@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>前世占い</title>
+<style>
+  body { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; max-width: 640px; margin: 0 auto; padding: 16px; line-height: 1.8; background: #14102b; color: #efe8d8; }
+  h1 { text-align: center; color: #e8c872; font-weight: normal; font-size: clamp(2.2rem, 9vw, 3rem); letter-spacing: 0.3em; text-indent: 0.3em; margin: 24px 0 8px; text-shadow: 0 0 14px rgba(232, 200, 114, 0.55); }
+  .intro { text-align: center; color: #b9b0d6; font-size: 0.95rem; line-height: 1.9; margin: 0 0 24px; }
+  h2 { color: #e8c872; font-weight: normal; font-size: 1.4rem; margin: 0 0 8px; }
+  h3 { color: #e8c872; font-weight: normal; border-bottom: 1px solid #8a76c4; padding-bottom: 4px; }
+  fieldset { margin: 14px 0; border: 1px solid #8a76c4; background: #241d4f; border-radius: 8px; }
+  legend { color: #e8c872; padding: 0 6px; }
+  label { display: inline-block; margin: 6px 16px 6px 0; padding: 4px 0; font-size: 1.05rem; }
+  input[type=checkbox] { width: 1.3em; height: 1.3em; vertical-align: middle; margin-right: 6px; accent-color: #e8c872; }
+  input[type=text], input[type=date] { font-size: 16px; padding: 8px; border: 1px solid #8a76c4; border-radius: 6px; background: #14102b; color: #efe8d8; }
+  input[type=text] { width: 90%; }
+  ::placeholder { color: #8c84ad; }
+  #nick { width: 17em; max-width: 100%; margin-left: 8px; }
+  button { font-size: 1.05rem; padding: 12px 20px; border: 1px solid #e8c872; border-radius: 8px; background: transparent; color: #e8c872; cursor: pointer; }
+  #go { background: #e8c872; color: #14102b; margin-top: 8px; }
+  .card { margin-top: 16px; padding: 12px 14px; border: 1px solid #e8c872; border-radius: 8px; background: #241d4f; box-shadow: 0 0 12px rgba(232, 200, 114, 0.25); }
+  .meta { color: #b9b0d6; }
+  .credit { font-size: 0.8rem; color: #8c84ad; }
+  .credit a, .foot a { color: #b9b0d6; }
+  #more { margin-top: 16px; }
+  #list { margin-top: 24px; }
+  #list td { padding: 2px 16px 2px 0; vertical-align: top; }
+  #list td:first-child { white-space: nowrap; color: #e8c872; }
+  #copy { margin-top: 8px; }
+  .foot { margin-top: 32px; font-size: 0.8rem; color: #8c84ad; text-align: center; line-height: 1.7; }
+</style>
+</head>
+<body>
+<h1>前世占い</h1>
+<p class="intro">人は、亡くなってから49日の間に生まれ変わる。<br>貴方が生まれた前日から49日さかのぼり、その間に亡くなった有名人の中から、貴方の趣味や性格に通じる魂を呼び出します。</p>
+
+<p>誕生日を入れてな</p>
+<input type="date" id="birth">
+<input type="text" id="nick" placeholder="ニックネーム（なくてもOK）" maxlength="20">
+
+<div id="form"></div>
+
+<button id="go">占う</button>
+<p id="msg"></p>
+<div id="cards"></div>
+<p id="status"></p>
+<button id="more" style="display:none">もっと前の前世を見る</button>
+<div id="list"></div>
+
+<p class="foot">略歴は日本語版Wikipedia（<a href="https://creativecommons.org/licenses/by-sa/4.0/deed.ja" target="_blank" rel="noopener">CC BY-SA 4.0</a>）、人物データはWikidata（CC0）を利用しています。<br>結果はお遊びの占いです。</p>
+
+<script>
+// ===== 設定 =====
+// 言語版の数がこれより多い人だけを有名人とする（候補が少なすぎたら下げる）
+const MIN_SITELINKS = 10;
+
+// 点数の重み
+const USER_WEIGHT_FIRST = 1;    // 前世（1回目）：あなたの選択の重み
+const USER_WEIGHT_LATER = 0.5;  // 前々世以降：あなたの選択の重み（ベース）
+const CHAIN_WEIGHT = 1;         // 前々世以降：ひとつ前の人生との繋がりの重み
+
+// 前々世以降の、共通点の文章の最大数
+const MAX_LINES_LATER = 2;
+
+// 検索中に出す文言
+const SEARCHING_TEXT = "あの世で貴方の前世を呼び出しています。。。";
+
+// 前々世以降の、世代ごとの言い出し（前々世、三世前、四世前…の順。最後のは以降ずっと使う）
+const LEADS = [
+  "前の人生と同じく、",
+  "さらにさかのぼっても、",
+  "その前も変わらず、",
+  "そのまた前も、",
+  "遠い昔から、",
+  "はるか昔から、",
+  "魂に刻まれたように、"
+];
+// 「同じ道に生きた」文の、世代ごとの言い方（LEADSと同じ順）
+const JOB_LINES = [
+  "前の人生と同じ道に生きた人でした。",
+  "さらにさかのぼっても、同じ道を歩んだ人でした。",
+  "その前も、同じ道に生きた人でした。",
+  "そのまた前も、同じ道を歩んだ人でした。",
+  "遠い昔から、同じ道に生きた人でした。",
+  "はるか昔から、同じ道を歩んだ人でした。",
+  "魂に刻まれたように、同じ道を歩んだ人でした。"
+];
+
+// 国名の省略表記（リスト・コピー・辿った国の行で使う。足したい国があれば1行足す）
+const COUNTRY_SHORT = {
+  "アメリカ合衆国": "アメリカ",
+  "グレートブリテン及びアイルランド連合王国": "イギリス",
+  "グレートブリテン及び北アイルランド連合王国": "イギリス",
+  "グレートブリテン王国": "イギリス",
+  "ソビエト連邦": "ソ連",
+  "ポーランド・リトアニア共和国": "ポーランド・リトアニア",
+  "大韓民国": "韓国",
+  "朝鮮民主主義人民共和国": "北朝鮮",
+  "中華人民共和国": "中国",
+  "ドイツ連邦共和国": "ドイツ",
+  "ドイツ民主共和国": "東ドイツ",
+  "ロシア連邦": "ロシア"
+};
+
+// ===== 質問と対応表（ここを直せば質問も選択肢も増やせる） =====
+// occs  = Wikidataの職業番号（当たったら +2点）
+// words = 日本語Wikipediaの冒頭文に入ってる言葉（1つでも入ってたら +1点）
+const GROUPS = [
+  { id: "sports", title: "趣味（運動系）", detail: true, items: {
+    "球技":   { occs: ["Q937857","Q10871364","Q10833314","Q3665646"], words: ["サッカー","野球","テニス","バスケ","ラグビー","バレーボール","卓球"] },
+    "格闘技": { occs: ["Q11338576","Q11124885","Q13474373"], words: ["ボクシング","柔道","空手","レスリング","格闘","相撲","力士"] },
+    "個人競技": { occs: ["Q11513337","Q11303721","Q10843402"], words: ["陸上","水泳","マラソン","ゴルフ","スキー","体操","孤高","単独","一匹狼"] },
+    "モータースポーツ": { occs: ["Q378622"], words: ["レーサー","レース","F1","ラリー","オートバイ"] }
+  }},
+  { id: "culture", title: "趣味（文科系）", detail: true, items: {
+    "読書・文章": { occs: ["Q36180","Q6625963","Q49757","Q1930187"], words: ["小説","詩","作家","随筆","評論"] },
+    "アート":     { occs: ["Q1028181","Q1281618","Q483501","Q33231","Q42973"], words: ["画家","彫刻","芸術","写真","建築"] },
+    "映像鑑賞":   { occs: ["Q33999","Q2526255","Q28389"], words: ["映画","俳優","監督","ドラマ","演劇"] },
+    "音楽":       { occs: ["Q177220","Q639669","Q36834","Q855091","Q158852"], words: ["歌手","作曲","音楽","ギタリスト","指揮者","演奏"] },
+    "ゲーム":     { occs: ["Q10873124","Q210167","Q170790"], words: ["ゲーム","将棋","囲碁","チェス","麻雀","賭","トランプ","パズル","クイズ","遊戯","玩具","勝負"] },
+    "学問・科学": { occs: ["Q901","Q169470","Q593644","Q11063","Q205375","Q201788","Q4964182","Q170790"], words: ["研究","学者","発明","発見","理論"] },
+    "占い・オカルト": { occs: [], words: ["占い","占星術","予言","霊","神秘","宗教","呪術"] }
+  }},
+  { id: "mood", title: "性格1", detail: false, items: {
+    "温厚":     { occs: ["Q37226","Q39631"], words: ["教育","教師","医師","福祉","慈善","僧","温厚"] },
+    "怒りっぽい": { occs: [], words: ["戦争","不祥事","汚職","逮捕","スキャンダル","独裁","暴行","事件","粛清","弾圧","激怒"] },
+    "陽気":     { occs: ["Q245068","Q33999"], words: ["喜劇","コメディ","お笑い","明るい","人気者","陽気"] },
+    "陰気":     { occs: ["Q4964182"], words: ["孤独","隠遁","厭世","憂鬱","暗い"] },
+    "変わり者": { occs: ["Q205375","Q483501"], words: ["奇人","変人","奇行","風変わり","前衛","異色","独特"] }
+  }},
+  { id: "stance", title: "性格2", detail: false, items: {
+    "好戦的":   { occs: ["Q189290","Q47064"], words: ["戦争","軍","将軍","侵攻","戦闘","元帥","戦い"] },
+    "平和主義": { occs: ["Q15253558","Q193391"], words: ["平和","非暴力","和平","人道","ボランティア","慈善","ノーベル平和賞"] },
+    "革命的":   { occs: [], words: ["革命","クーデター","反乱","蜂起","改革","独立運動","反体制"] },
+    "日和見主義": { occs: ["Q82955"], words: ["転向","連立","寝返","妥協","無所属","日和見"] }
+  }}
+];
+
+// ===== 共通点の一言（項目ごとに3パターン。ランダムで選ばれる。好きに直してOK） =====
+const LINES = {
+  "球技": ["球技に熱くなる人でした", "ボールを追う時間に夢中になれる人でした", "勝ち負けのある球技に心を燃やす人でした"],
+  "格闘技": ["闘いに身を置く人でした", "拳や技で語る世界に生きた人でした", "組み合う勝負に惹かれた人でした"],
+  "個人競技": ["孤高に己を磨く人でした", "自分ひとりと向き合い続けた人でした", "記録や自分自身との勝負に生きた人でした"],
+  "モータースポーツ": ["スピードに魅せられた人でした", "速さを追い求めた人でした", "エンジンの音に胸を躍らせた人でした"],
+  "読書・文章": ["言葉を愛した人でした", "文章に想いを託した人でした", "本と言葉の世界に親しんだ人でした"],
+  "アート": ["美を追い求めた人でした", "美しいものに心を奪われた人でした", "形や色で何かを表そうとした人でした"],
+  "映像鑑賞": ["物語や映像に心を動かされる人でした", "スクリーンの向こうの世界に惹かれた人でした", "演じることや物語に魅せられた人でした"],
+  "音楽": ["音とともに生きた人でした", "旋律に心を預けた人でした", "音楽のそばで暮らした人でした"],
+  "ゲーム": ["勝負と遊びに心を躍らせた人でした", "駆け引きを楽しんだ人でした", "遊び心を忘れなかった人でした"],
+  "学問・科学": ["探究心にあふれた人でした", "なぜ、を追い続けた人でした", "真理を知りたがった人でした"],
+  "占い・オカルト": ["目に見えないものに惹かれた人でした", "運命や神秘に思いを寄せた人でした", "不思議なものを信じる心を持った人でした"],
+  "温厚": ["穏やかな気質の人でした", "人当たりのやわらかな人でした", "争いより対話を好んだ人でした"],
+  "怒りっぽい": ["激しやすい気性の人でした", "短気で知られた人でした", "感情を隠さない、激しい人でした"],
+  "陽気": ["陽気で人を惹きつける人でした", "笑いの絶えない人でした", "明るさで周りを照らす人でした"],
+  "陰気": ["物静かで影のある人でした", "孤独を抱えた人でした", "どこか陰を帯びた人でした"],
+  "変わり者": ["ひときわ変わり者の人でした", "常識に収まらない人でした", "風変わりな才能を持った人でした"],
+  "好戦的": ["戦いを辞さない人でした", "闘争心の強い人でした", "衝突を恐れない人でした"],
+  "平和主義": ["平和を願う人でした", "争いのない世を望んだ人でした", "人の痛みに寄り添おうとした人でした"],
+  "革命的": ["世の中を変えようとした人でした", "古い仕組みに挑んだ人でした", "時代を動かそうとした人でした"],
+  "日和見主義": ["風向きを読むのがうまい人でした", "時流を見て身を処した人でした", "立ち回りの巧みな人でした"]
+};
+
+// ===== 人間じゃなかった時のオチ（weight = 出やすさ、label = 一覧に出る名前） =====
+const ENDINGS = [
+  { weight: 60, label: "虫", text: "おそらく虫です。" },
+  { weight: 25, label: "鳥か魚", text: "おそらく名もなき鳥か魚です。" },
+  { weight: 10, label: "草花", text: "おそらく道ばたに咲く草花です。" },
+  { weight: 5,  label: "神", text: "なんと、神です。ご利益があるかもしれません。" }
+];
+
+// ===== 世代の呼び方 =====
+const GEN = ["前世","前々世","三世前","四世前","五世前","六世前","七世前","八世前","九世前","十世前"];
+function genLabel(i) { return GEN[i] || (i + 1) + "世前"; }
+
+// 全部の項目をひとつの配列にしておく
+const ALL_ITEMS = [];
+for (const g of GROUPS) {
+  for (const name of Object.keys(g.items)) {
+    ALL_ITEMS.push({ name: name, occs: g.items[name].occs, words: g.items[name].words });
+  }
+}
+
+// ===== 画面づくり =====
+const formDiv = document.getElementById("form");
+for (const g of GROUPS) {
+  const fs = document.createElement("fieldset");
+  let html = "<legend>" + g.title + "</legend>";
+  for (const name of Object.keys(g.items)) {
+    html += '<label><input type="checkbox" data-group="' + g.id + '" value="' + name + '"> ' + name + "</label>";
+  }
+  if (g.detail) {
+    html += '<div>その他・詳細（自由入力。複数なら「、」で区切る）<br><input type="text" id="detail-' + g.id + '"></div>';
+  }
+  fs.innerHTML = html;
+  formDiv.appendChild(fs);
+}
+
+const msgDiv = document.getElementById("msg");
+const statusDiv = document.getElementById("status");
+const cardsDiv = document.getElementById("cards");
+const moreBtn = document.getElementById("more");
+const listDiv = document.getElementById("list");
+
+// ===== 便利関数 =====
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// "1892-12-04T00:00:00Z" → "1892年"
+function yearOf(s) {
+  if (!s) return null;
+  const m = s.match(/^(-?\d+)-/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  return y < 0 ? "紀元前" + Math.abs(y) + "年" : y + "年";
+}
+
+// 国名を省略表記にする
+function shortCountry(c) {
+  return COUNTRY_SHORT[c] || c;
+}
+
+// 国の一覧を、省略表記で2つまで「・」でつなぐ（同じ名前になったらまとめる）
+function countryText(list) {
+  const out = [];
+  for (const c of list) {
+    const s = shortCountry(c);
+    if (!out.includes(s)) out.push(s);
+  }
+  return out.slice(0, 2).join("・");
+}
+
+// 職業が略歴に出てくる度合い（メインの職業を頭に並べるのに使う）
+// 職業名そのものが出てくれば2点、「家・者・員・人」を外した言葉が出てくれば1点
+function jobScore(job, text) {
+  if (text.includes(job)) return 2;
+  const stem = job.replace(/(家|者|員|人)$/, "");
+  if (stem !== job && stem.length >= 2 && text.includes(stem)) return 1;
+  return 0;
+}
+
+// 表示用の名前：「アレクサンドル・オストロフスキー (劇作家)」のように、
+// カッコの中がその人の職業と同じ時だけカッコを消す
+function displayName(name, jobs) {
+  const m = name.match(/^(.*?)\s*[（(]([^（）()]*)[）)]\s*$/);
+  if (m && jobs.includes(m[2])) return m[1];
+  return name;
+}
+
+// Wikipedia冒頭文から、（）の中を消して短い略歴にする
+function summarize(text) {
+  let t = (text || "").replace(/\n/g, "");
+  let prev;
+  do {
+    prev = t;
+    t = t.replace(/[（(][^（）()]*[）)]/g, "");
+  } while (t !== prev);
+  const sents = t.split("。").filter(s => s.trim());
+  let out = "";
+  for (let i = 0; i < sents.length && i < 3; i++) {
+    out += sents[i] + "。";
+    if (out.length >= 100) break;
+  }
+  return out;
+}
+
+// 重みつきでオチを1つ選ぶ
+function pickEnding() {
+  const total = ENDINGS.reduce((s, e) => s + e.weight, 0);
+  let r = Math.random() * total;
+  for (const e of ENDINGS) {
+    r -= e.weight;
+    if (r < 0) return e;
+  }
+  return ENDINGS[0];
+}
+
+// 項目 it に、人 p がどれだけ当てはまるか（職業+2、言葉+1）
+function matchItem(it, p) {
+  let pts = 0;
+  if (it.occs.some(q => p.occIds.includes(q))) pts += 2;
+  if (it.words.some(w => p.text.includes(w))) pts += 1;
+  return pts;
+}
+
+// 項目の名前から、共通点の一言を1つ作る（自由入力の言葉にも対応）
+function fragOf(m) {
+  if (m.startsWith("「")) {
+    return pick([
+      m + "にも縁のある人でした",
+      m + "とも無縁ではない人でした",
+      m + "に通じるところのある人でした"
+    ]);
+  }
+  return pick(LINES[m]);
+}
+
+// 共通点の文章を作る（内側の理由は見せず、人物像として書く）
+// depth = 何番目の前世か（前世=0、前々世=1、三世前=2…）
+function makeCommon(p, prev, depth) {
+  if (!prev) {
+    const adds = ["また、", "さらに、", "加えて、"];
+    return p.userMatched.slice(0, 3)
+      .map((m, i) => (i === 0 ? "この人も、" : pick(adds)) + fragOf(m) + "。")
+      .join("");
+  }
+
+  // 世代ごとの言い出しを選ぶ
+  const di = Math.max(0, Math.min(depth - 1, LEADS.length - 1));
+
+  // 前の人生にもあなたにも当たった項目は、1つにまとめる
+  const both = p.userMatched.filter(m => p.chainMatched.includes(m));
+  const chainOnly = p.chainMatched.filter(m => !both.includes(m));
+  const userOnly = p.userMatched.filter(m => !both.includes(m));
+
+  // 文の材料を、優先順に並べる
+  const items = [];
+  if (both.length > 0) items.push({ type: "both", frag: fragOf(both[0]) });
+  if (p.sameJob) items.push({ type: "job" });
+  if (chainOnly.length > 0) items.push({ type: "chain", frag: fragOf(chainOnly[0]) });
+  if (userOnly.length > 0) items.push({ type: "user", frag: fragOf(userOnly[0]) });
+
+  // 1文目は世代ごとの言い出し。2文目からは「また、」「さらに、」
+  const adds = ["また、", "さらに、"];
+  return items.slice(0, MAX_LINES_LATER).map((it, i) => {
+    if (i === 0) {
+      if (it.type === "both") return LEADS[di] + "あなたとも通じる、" + it.frag + "。";
+      if (it.type === "job") return JOB_LINES[di];
+      if (it.type === "chain") return LEADS[di] + it.frag + "。";
+      return pick(["あなたと同じく、", "あなたにも通じる、"]) + it.frag + "。";
+    }
+    const add = adds[i - 1] || "そして、";
+    if (it.type === "both") return add + "あなたにも通じる、" + it.frag + "。";
+    if (it.type === "job") return add + pick(["同じ道を歩んだ人でした。", "同じ職に生きた人でした。"]);
+    if (it.type === "chain") return add + it.frag + "。";
+    return add + "あなたと同じく、" + it.frag + "。";
+  }).join("");
+}
+
+// 日本語Wikipediaの冒頭文を、まとめて取ってくる
+async function fetchIntros(titles) {
+  const byTitle = {};
+  for (let i = 0; i < titles.length; i += 20) {
+    const chunk = titles.slice(i, i + 20);
+    const url = "https://ja.wikipedia.org/w/api.php?action=query&prop=extracts"
+      + "&exintro=1&explaintext=1&exlimit=20&redirects=1&format=json&origin=*"
+      + "&titles=" + encodeURIComponent(chunk.join("|"));
+    const res = await fetch(url);
+    const data = await res.json();
+    const q = data.query || {};
+    for (const pg of Object.values(q.pages || {})) {
+      byTitle[pg.title] = pg.extract || "";
+    }
+    // 転送・表記ゆれで題名が変わった分をつなぐ（転送 → 正規化の順）
+    for (const r of (q.redirects || [])) {
+      if (byTitle[r.to] !== undefined) byTitle[r.from] = byTitle[r.to];
+    }
+    for (const n of (q.normalized || [])) {
+      if (byTitle[n.to] !== undefined) byTitle[n.from] = byTitle[n.to];
+    }
+  }
+  return byTitle;
+}
+
+// クリップボードにコピー（だめなら昔ながらの方法で）
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e2) {
+      return false;
+    }
+  }
+}
+
+// ===== 状態 =====
+let sel = null;     // 今回の入力（誕生日・ニックネーム・選んだ項目・自由入力）
+let chain = [];     // 出てきた人（または人間じゃなかったオチ）を順番に入れる
+let busy = false;
+
+// ===== 前世を1人探す（見つからなければ null） =====
+async function findLife(baseDay, prev, depth) {
+  const start = addDays(baseDay, -49);
+  const end = addDays(baseDay, -1);
+
+  const query = `
+    SELECT ?p ?jaTitle ?death ?birthDate ?bprec ?occ ?occLabel ?citLabel ?sexLabel WHERE {
+      ?p wdt:P31 wd:Q5;
+         wikibase:sitelinks ?sl;
+         p:P570/psv:P570 ?dv.
+      ?dv wikibase:timeValue ?death;
+          wikibase:timePrecision ?prec.
+      ?article schema:about ?p;
+               schema:isPartOf <https://ja.wikipedia.org/>;
+               schema:name ?jaTitle.
+      FILTER(?prec = 11)
+      FILTER(?death >= "${start}T00:00:00Z"^^xsd:dateTime &&
+             ?death <= "${end}T23:59:59Z"^^xsd:dateTime)
+      FILTER(?sl > ${MIN_SITELINKS})
+      OPTIONAL { ?p p:P569/psv:P569 ?bv.
+                 ?bv wikibase:timeValue ?birthDate;
+                     wikibase:timePrecision ?bprec. }
+      OPTIONAL { ?p wdt:P106 ?occ. }
+      OPTIONAL { ?p wdt:P27 ?cit. }
+      OPTIONAL { ?p wdt:P21 ?sex. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "ja". }
+    }`;
+
+  const url = "https://query.wikidata.org/sparql?format=json&query="
+            + encodeURIComponent(query);
+  const res = await fetch(url);
+  const data = await res.json();
+  const rows = data.results.bindings;
+
+  // 人ごとにまとめる
+  const people = {};
+  for (const r of rows) {
+    const id = r.p.value;
+    if (!people[id]) {
+      people[id] = {
+        name: r.jaTitle.value,
+        death: r.death.value,
+        birth: null,
+        birthDay: null,   // 日まで分かってる誕生日（次の前世を探す起点）
+        jobs: [],
+        occIds: [],
+        countries: [],
+        sex: null
+      };
+    }
+    const p = people[id];
+    if (r.birthDate) {
+      const bv = r.birthDate.value;
+      if (!p.birth) p.birth = bv;
+      if (!p.birthDay && r.bprec && r.bprec.value === "11" && /^\d{4}-\d{2}-\d{2}/.test(bv)) {
+        p.birthDay = bv.slice(0, 10);
+      }
+    }
+    // 日本語名が無いもの（Q番号のまま出るもの）は表示しない
+    if (r.occLabel && !/^Q\d+$/.test(r.occLabel.value) && !p.jobs.includes(r.occLabel.value)) {
+      p.jobs.push(r.occLabel.value);
+    }
+    if (r.occ) {
+      const q = r.occ.value.split("/").pop();
+      if (!p.occIds.includes(q)) p.occIds.push(q);
+    }
+    if (r.citLabel && !/^Q\d+$/.test(r.citLabel.value) && !p.countries.includes(r.citLabel.value)) {
+      p.countries.push(r.citLabel.value);
+    }
+    if (!p.sex && r.sexLabel && !/^Q\d+$/.test(r.sexLabel.value)) {
+      p.sex = r.sexLabel.value;
+    }
+  }
+
+  const list = Object.values(people);
+  if (list.length === 0) return null;
+
+  // 冒頭文を取ってくる（失敗しても職業マッチだけで続行）
+  let intros = {};
+  try {
+    intros = await fetchIntros(list.map(p => p.name));
+  } catch (e) {
+    intros = {};
+  }
+  for (const p of list) {
+    p.text = intros[p.name] || "";
+    // 略歴に出てくる職業を先頭に並べる（メインの職業が頭に来やすくなる）
+    p.jobs.sort((a, b) => jobScore(b, p.text) - jobScore(a, p.text));
+  }
+
+  // 点数をつける
+  const uw = prev ? USER_WEIGHT_LATER : USER_WEIGHT_FIRST;
+  for (const p of list) {
+    p.score = 0;
+    p.userMatched = [];
+    p.chainMatched = [];
+    p.sameJob = false;
+
+    // あなたの選択
+    for (const c of sel.chosen) {
+      const pts = matchItem(c, p);
+      if (pts > 0) { p.score += pts * uw; p.userMatched.push(c.name); }
+    }
+    for (const t of sel.terms) {
+      if (p.text.includes(t) || p.jobs.some(j => j.includes(t))) {
+        p.score += 1 * uw;
+        p.userMatched.push("「" + t + "」");
+      }
+    }
+
+    // ひとつ前の人生との繋がり
+    if (prev) {
+      for (const it of ALL_ITEMS) {
+        if (!prev.traits.includes(it.name)) continue;
+        const pts = matchItem(it, p);
+        if (pts > 0) { p.score += pts * CHAIN_WEIGHT; p.chainMatched.push(it.name); }
+      }
+      const shared = p.occIds.filter(q => prev.occIds.includes(q)).length;
+      if (shared > 0) {
+        p.score += Math.min(shared, 2) * 2 * CHAIN_WEIGHT;
+        p.sameJob = true;
+      }
+    }
+  }
+
+  // 誰にも当たらなかったら null（人間じゃなかったオチへ）
+  const best = Math.max(...list.map(p => p.score));
+  if (best <= 0) return null;
+
+  // 一番高い人たちからランダムに1人
+  const pool = list.filter(p => p.score === best);
+  const chosenOne = pool[Math.floor(Math.random() * pool.length)];
+
+  const n = Math.max(1, Math.min(Math.round(chosenOne.score), 5));
+
+  return {
+    kind: "person",
+    name: chosenOne.name,
+    shown: displayName(chosenOne.name, chosenOne.jobs),
+    url: "https://ja.wikipedia.org/wiki/" + encodeURIComponent(chosenOne.name.replace(/ /g, "_")),
+    by: yearOf(chosenOne.birth),
+    dy: yearOf(chosenOne.death),
+    jobs: chosenOne.jobs,
+    countries: chosenOne.countries,
+    sex: chosenOne.sex,
+    summary: summarize(chosenOne.text),
+    common: makeCommon(chosenOne, prev, depth),
+    stars: "★".repeat(n) + "☆".repeat(5 - n),
+    birthDay: chosenOne.birthDay,
+    occIds: chosenOne.occIds,
+    text: chosenOne.text,
+    // この人がどの項目に当てはまるか（次の前世を選ぶ手がかり）
+    traits: ALL_ITEMS.filter(it => matchItem(it, chosenOne) > 0).map(it => it.name)
+  };
+}
+
+// ===== 画面に出す =====
+function addCard(life) {
+  const country = life.countries.length ? life.countries.slice(0, 2).join("・") : "不明";
+  const sex = life.sex || "不明";
+  const credit = '<br><span class="credit">略歴：<a href="' + esc(life.url)
+    + '" target="_blank" rel="noopener">日本語版Wikipedia</a>より（CC BY-SA 4.0、一部省略）</span>';
+  const div = document.createElement("div");
+  div.className = "card";
+  div.innerHTML =
+    "<h2>あなたの" + esc(life.label) + "は「" + esc(life.shown) + "」</h2>" +
+    '<p class="meta">国籍：' + esc(country) + "　性別：" + esc(sex) + "</p>" +
+    "<p>相性：" + life.stars + "</p>" +
+    "<p>" + esc(life.common) + "</p>" +
+    "<p>" + (life.by || "生年不明") + "生まれ 〜 " + (life.dy || "没年不明") + "没</p>" +
+    "<p>職業：" + esc(life.jobs.slice(0, 5).join("、") || "不明") + "</p>" +
+    (life.summary ? "<p>" + esc(life.summary) + credit + "</p>" : "");
+  cardsDiv.appendChild(div);
+}
+
+function addEndingCard(label, e) {
+  const div = document.createElement("div");
+  div.className = "card";
+  div.innerHTML =
+    "<h2>" + esc(label) + "は人間ではありませんでした</h2>" +
+    "<p>あなたの" + esc(label) + "は、" + esc(e.text) + "</p>";
+  cardsDiv.appendChild(div);
+}
+
+// 前世リストの見出し（コピー用は「私の前世リスト」）
+function listTitle(forCopy) {
+  if (sel.nick) return sel.nick + "の前世リスト";
+  return forCopy ? "私の前世リスト" : "あなたの前世リスト";
+}
+
+function renderList() {
+  const rows = [];
+  rows.push(["現世", (sel.nick || "自分") + "　" + yearOf(sel.birth) + "〜"]);
+  for (const c of chain) {
+    if (c.kind === "person") {
+      const country = c.countries.length ? "（" + countryText(c.countries) + "）" : "";
+      rows.push([
+        c.label,
+        c.shown + country + "　" + (c.by || "生年不明") + "〜" + (c.dy || "没年不明")
+          + (c.jobs.length ? "　" + c.jobs.slice(0, 2).join("、") : "")
+      ]);
+    } else {
+      rows.push([c.label, c.short]);
+    }
+  }
+  // 辿った国の流れ（国は2つまで、省略表記）
+  const route = chain.map(c => c.kind === "person"
+    ? (c.countries.length ? countryText(c.countries) : "国不明")
+    : c.short);
+  const routeText = "辿った国：" + route.join(" → ");
+
+  // コピー用の文章
+  const copyBody = listTitle(true) + "\n"
+    + rows.map(r => r[0] + "　" + r[1]).join("\n") + "\n"
+    + routeText;
+
+  listDiv.innerHTML =
+    "<h3>" + esc(listTitle(false)) + "</h3><table>" +
+    rows.map(r => "<tr><td>" + esc(r[0]) + "</td><td>" + esc(r[1]) + "</td></tr>").join("") +
+    "</table>" +
+    "<p>" + esc(routeText) + "</p>" +
+    '<button id="copy">リストをコピー</button>';
+
+  const btn = document.getElementById("copy");
+  btn.onclick = async () => {
+    const ok = await copyText(copyBody);
+    btn.textContent = ok ? "コピーしたで！" : "コピーできんかった…";
+    setTimeout(() => { btn.textContent = "リストをコピー"; }, 2000);
+  };
+}
+
+// ===== 1段さかのぼる =====
+async function step(baseDay, prev) {
+  if (busy) return;
+  busy = true;
+  statusDiv.textContent = SEARCHING_TEXT;
+  moreBtn.style.display = "none";
+  try {
+    // 起点の誕生日が日まで分からん時は、そこで終わり
+    const life = baseDay ? await findLife(baseDay, prev, chain.length) : null;
+    const label = genLabel(chain.length);
+    if (life) {
+      life.label = label;
+      chain.push(life);
+      addCard(life);
+      moreBtn.style.display = "";
+    } else {
+      const e = pickEnding();
+      chain.push({ kind: "ending", label: label, short: e.label });
+      addEndingCard(label, e);
+    }
+    statusDiv.textContent = "";
+    renderList();
+  } catch (e) {
+    statusDiv.textContent = "エラー: " + e;
+    const last = chain[chain.length - 1];
+    if (last && last.kind === "person") moreBtn.style.display = "";
+  } finally {
+    busy = false;
+  }
+}
+
+// ===== 占う（最初から） =====
+document.getElementById("go").onclick = () => {
+  if (busy) return;
+  const birth = document.getElementById("birth").value;
+  if (!birth) {
+    msgDiv.textContent = "誕生日を入れてや";
+    return;
+  }
+
+  // 選ばれた項目を集める
+  const chosen = [];
+  for (const cb of document.querySelectorAll("#form input[type=checkbox]:checked")) {
+    const g = GROUPS.find(x => x.id === cb.dataset.group);
+    chosen.push({ name: cb.value, occs: g.items[cb.value].occs, words: g.items[cb.value].words });
+  }
+  // 自由入力を集める
+  const terms = [];
+  for (const g of GROUPS) {
+    if (!g.detail) continue;
+    const v = document.getElementById("detail-" + g.id).value;
+    v.split(/[、,，\s]+/).filter(Boolean).forEach(t => terms.push(t));
+  }
+
+  // 何も選んでない時は占えない
+  if (chosen.length === 0 && terms.length === 0) {
+    msgDiv.textContent = "趣味か性格を、ひとつは選んでや";
+    return;
+  }
+
+  // 最初からやり直し
+  msgDiv.textContent = "";
+  sel = {
+    birth: birth,
+    nick: document.getElementById("nick").value.trim(),
+    chosen: chosen,
+    terms: terms
+  };
+  chain = [];
+  cardsDiv.innerHTML = "";
+  listDiv.innerHTML = "";
+  moreBtn.style.display = "none";
+
+  step(birth, null);
+};
+
+// ===== もっと前の前世を見る =====
+moreBtn.onclick = () => {
+  const last = chain[chain.length - 1];
+  if (!last || last.kind !== "person") return;
+  step(last.birthDay, last);
+};
+</script>
+</body>
+</html>
