@@ -52,7 +52,33 @@
 <p class="foot">略歴は日本語版Wikipedia（<a href="https://creativecommons.org/licenses/by-sa/4.0/deed.ja" target="_blank" rel="noopener">CC BY-SA 4.0</a>）、人物データはWikidata（CC0）を利用しています。<br>結果はお遊びの占いです。</p>
 
 <script>
-// ===== 設定 =====
+const GAS_URL = "https://script.google.com/macros/s/AKfycbz7Sx6pXp7u-dmOJNQhAt3zvCBYw5Q3Ah5tkqcyZhPWLR6fcXGGET525zX04-nesB0b/exec";
+
+function getVisitorId() {
+  let id = localStorage.getItem("visitorId");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("visitorId", id);
+  }
+  return id;
+}
+
+function sendLog(event) {
+  fetch(GAS_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: {
+      "Content-Type": "text/plain"
+    },
+    body: JSON.stringify({
+      id: getVisitorId(),
+      event: event
+    })
+  }).catch(() => {});
+}
+
+sendLog("訪問");
+  // ===== 設定 =====
 // 言語版の数がこれより多い人だけを有名人とする（候補が少なすぎたら下げる）
 const MIN_SITELINKS = 10;
 
@@ -664,6 +690,7 @@ async function step(baseDay, prev) {
 
 // ===== 占う（最初から） =====
 document.getElementById("go").onclick = () => {
+    sendLog("占い");
   if (busy) return;
   const birth = document.getElementById("birth").value;
   if (!birth) {
