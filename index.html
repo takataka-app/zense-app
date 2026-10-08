@@ -14,7 +14,9 @@
   legend { color: #e8c872; padding: 0 6px; }
   label { display: inline-block; margin: 6px 16px 6px 0; padding: 4px 0; font-size: 1.05rem; }
   input[type=checkbox] { width: 1.3em; height: 1.3em; vertical-align: middle; margin-right: 6px; accent-color: #e8c872; }
-  input[type=text], input[type=date] { font-size: 16px; padding: 8px; border: 1px solid #8a76c4; border-radius: 6px; background: #14102b; color: #efe8d8; }
+  input[type=text], select { font-size: 16px; padding: 8px; border: 1px solid #8a76c4; border-radius: 6px; background: #14102b; color: #efe8d8; }
+  #birthRow { margin: 8px 0; }
+  #by { width: 4.5em; text-align: center; }
   input[type=text] { width: 90%; }
   ::placeholder { color: #8c84ad; }
   #nick { width: 17em; max-width: 100%; margin-left: 8px; }
@@ -37,7 +39,11 @@
 <p class="intro">人は、亡くなってから49日の間に生まれ変わる。<br>貴方が生まれた前日から49日さかのぼり、その間に亡くなった有名人の中から、貴方の趣味や性格に通じる魂を呼び出します。</p>
 
 <p>誕生日を入れてな</p>
-<input type="date" id="birth">
+<div id="birthRow">
+  <input type="text" id="by" inputmode="numeric" maxlength="4" placeholder="1980" aria-label="年"> 年
+  <select id="bm" aria-label="月"></select> 月
+  <select id="bd" aria-label="日"></select> 日
+</div>
 <input type="text" id="nick" placeholder="ニックネーム（なくてもOK）" maxlength="20">
 
 <div id="form"></div>
@@ -228,6 +234,56 @@ const statusDiv = document.getElementById("status");
 const cardsDiv = document.getElementById("cards");
 const moreBtn = document.getElementById("more");
 const listDiv = document.getElementById("list");
+// ===== 誕生日の入力（年は数字、月日はプルダウン） =====
+const byInput = document.getElementById("by");
+const bmSel = document.getElementById("bm");
+const bdSel = document.getElementById("bd");
+
+// 年の欄を、半角の数字だけにして返す（全角で打たれても大丈夫）
+function readYear() {
+  return byInput.value
+    .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[^0-9]/g, "");
+}
+
+// その月が何日まであるか（年が未入力の間は、うるう年として扱う）
+function daysIn(y, m) {
+  if (!m) return 31;
+  if (m === 2) {
+    const leap = isNaN(y) ? true : ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(m) ? 30 : 31;
+}
+
+// 月と年に合わせて、日のプルダウンを作り直す（選んでた日は、あれば残す）
+function updateDays() {
+  const y = parseInt(readYear(), 10);
+  const m = parseInt(bmSel.value, 10);
+  const keep = bdSel.value;
+  const n = daysIn(y, m);
+  let html = '<option value="">--</option>';
+  for (let d = 1; d <= n; d++) html += '<option value="' + d + '">' + d + "</option>";
+  bdSel.innerHTML = html;
+  if (keep && parseInt(keep, 10) <= n) bdSel.value = keep;
+}
+
+// 月のプルダウンを作る
+let monthHtml = '<option value="">--</option>';
+for (let m = 1; m <= 12; m++) monthHtml += '<option value="' + m + '">' + m + "</option>";
+bmSel.innerHTML = monthHtml;
+updateDays();
+
+byInput.addEventListener("input", updateDays);
+byInput.addEventListener("blur", () => { byInput.value = readYear(); });
+bmSel.addEventListener("change", updateDays);
+
+// 入力された誕生日を "1975-11-03" の形にして返す（足りなければ空）
+function getBirth() {
+  const y = readYear(), m = bmSel.value, d = bdSel.value;
+  if (!y || !m || !d) return "";
+  return y.padStart(4, "0") + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+}  
 
 // ===== 便利関数 =====
 function addDays(dateStr, n) {
@@ -692,7 +748,12 @@ async function step(baseDay, prev) {
 document.getElementById("go").onclick = () => {
     sendLog("占い");
   if (busy) return;
-  const birth = document.getElementById("birth").value;
+    const yearNum = parseInt(readYear(), 10);
+  if (!yearNum || yearNum < 1900 || yearNum > new Date().getFullYear()) {
+    msgDiv.textContent = "生まれた年を確認してや（1900年〜今年）";
+    return;
+  }
+  const birth = getBirth();
   if (!birth) {
     msgDiv.textContent = "誕生日を入れてや";
     return;
